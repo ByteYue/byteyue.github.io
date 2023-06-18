@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 6.3.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"example.com","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="介绍译者一直对有关coroutine和execution的概念非常迷恋，近来希望将对这部分内容的学习心得简单分享一下提升下自己的理解，预计会有5 6篇博文产出，先以这篇CppCon的翻译起个头 下文会从pdf的第一章开始翻译 motivating futures&#x2F;promises + actors当工程师试图打造一款高性能且正确的分布式系统时会遇到许多关键挑战。概括下来有两条  在代码中">
+<meta property="og:type" content="article">
+<meta property="og:title" content="译From Eager  Futures&#x2F;Promises  to Lazy Continuations">
+<meta property="og:url" content="http://example.com/2023/06/17/%E8%AF%91From-Eager-Futures-Promises-to-Lazy-Continuations/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="介绍译者一直对有关coroutine和execution的概念非常迷恋，近来希望将对这部分内容的学习心得简单分享一下提升下自己的理解，预计会有5 6篇博文产出，先以这篇CppCon的翻译起个头 下文会从pdf的第一章开始翻译 motivating futures&#x2F;promises + actors当工程师试图打造一款高性能且正确的分布式系统时会遇到许多关键挑战。概括下来有两条  在代码中">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="http://example.com/%E8%AF%91From-Eager-Futures-Promises-to-Lazy-Continuations/actors%E4%BA%A4%E4%BA%92%E5%9B%BE.png">
+<meta property="og:image" content="http://example.com/%E8%AF%91From-Eager-Futures-Promises-to-Lazy-Continuations/threads%E4%BA%A4%E4%BA%92%E5%9B%BE.png">
+<meta property="article:published_time" content="2023-06-17T15:23:03.000Z">
+<meta property="article:modified_time" content="2023-06-18T06:31:28.967Z">
+<meta property="article:author" content="John Doe">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http://example.com/%E8%AF%91From-Eager-Futures-Promises-to-Lazy-Continuations/actors%E4%BA%A4%E4%BA%92%E5%9B%BE.png">
+
+<link rel="canonical" href="http://example.com/2023/06/17/%E8%AF%91From-Eager-Futures-Promises-to-Lazy-Continuations/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'en'
+  };
+</script>
+
+  <title>译From Eager  Futures/Promises  to Lazy Continuations | Hexo</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="Toggle navigation bar">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">Hexo</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>Home</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-about"></i>About</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>Archives</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="en">
+    <link itemprop="mainEntityOfPage" href="http://example.com/2023/06/17/%E8%AF%91From-Eager-Futures-Promises-to-Lazy-Continuations/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="John Doe">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Hexo">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          译From Eager  Futures/Promises  to Lazy Continuations
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">Posted on</span>
+
+              <time title="Created: 2023-06-17 23:23:03" itemprop="dateCreated datePublished" datetime="2023-06-17T23:23:03+08:00">2023-06-17</time>
+            </span>
+              <span class="post-meta-item">
+                <span class="post-meta-item-icon">
+                  <i class="fa fa-calendar-check-o"></i>
+                </span>
+                <span class="post-meta-item-text">Edited on</span>
+                <time title="Modified: 2023-06-18 14:31:28" itemprop="dateModified" datetime="2023-06-18T14:31:28+08:00">2023-06-18</time>
+              </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h2 id="介绍"><a href="#介绍" class="headerlink" title="介绍"></a>介绍</h2><p>译者一直对有关coroutine和execution的概念非常迷恋，近来希望将对这部分内容的学习心得简单分享一下提升下自己的理解，预计会有5 6篇博文产出，先以这篇CppCon的翻译起个头</p>
+<p>下文会从pdf的第一章开始翻译</p>
+<h2 id="motivating-futures-x2F-promises-actors"><a href="#motivating-futures-x2F-promises-actors" class="headerlink" title="motivating futures&#x2F;promises + actors"></a>motivating futures&#x2F;promises + actors</h2><p>当工程师试图打造一款高性能且正确的分布式系统时会遇到许多关键挑战。概括下来有两条</p>
+<ol>
+<li>在代码中不得不有等待的条件</li>
+<li>在代码中有state</li>
+</ol>
+<h3 id="如何解决等待的问题"><a href="#如何解决等待的问题" class="headerlink" title="如何解决等待的问题"></a>如何解决等待的问题</h3><p>以下面的代码为例</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">std::string text=<span class="string">&quot;...&quot;</span>;</span><br><span class="line">text = <span class="built_in">SpellCehck</span>(text);</span><br><span class="line">text = <span class="built_in">GrammerCheck</span>(text);</span><br></pre></td></tr></table></figure>
+
+<p>上面的代码可通过函数的组合修改成一行<code>GrammerCheck(SpellCehck(&quot;...&quot;))</code>. 不过接下来我们还是分开分析，先分析SpellCheck函数的实现</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">std::string <span class="title">SpellCheck</span><span class="params">(std::string text)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">auto</span> body = http::<span class="built_in">UrlEncode</span>(&#123;<span class="string">&quot;text&quot;</span>, text&#125;);</span><br><span class="line">  <span class="keyword">auto</span> response = http::<span class="built_in">Post</span>(<span class="string">&quot;https://www.online-spellcheck.com&quot;</span>, body);</span><br><span class="line">  <span class="keyword">return</span> response.body;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>无论这段代码之中的<code>Http::Post</code>方法是阻塞的还是非阻塞都不会改变一件事实：你的代码不得不在这里等待<br>可能的解决方案如下：</p>
+<ol>
+<li>就死等. 这个方案肯定是不会采纳的</li>
+<li>使用线程. 成本高昂同时对正确性无益</li>
+<li>使用coroutine. 作者当时是09年 还没有好用的C++ coroutine</li>
+<li>使用不同的语言比如erlang 或者 把erlang带进C++之中</li>
+<li>使用回调函数，之后会讨论这个</li>
+<li>使用future&#x2F;promise</li>
+</ol>
+<p>接下来我们讨论future&#x2F;promise。<br>future&#x2F;promise就像buffered channel一样</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">Promise&lt;std::string&gt; promise;</span><br><span class="line">---------------thread x-------------</span><br><span class="line">Channel::Reader&lt;std::string&gt; reader = channel.<span class="built_in">Reader</span>();</span><br><span class="line">reader.<span class="built_in">Read</span>(); <span class="comment">// Blocks!</span></span><br><span class="line">---------------thread y-------------</span><br><span class="line">Channel::Writer&lt;std::string&gt; writer = channel.<span class="built_in">Writer</span>();</span><br><span class="line">writer.<span class="built_in">Write</span>(<span class="string">&quot;...&quot;</span>); <span class="comment">// Non-blocking!</span></span><br><span class="line">writer.<span class="built_in">Close</span>();</span><br></pre></td></tr></table></figure>
+
+<p>改为future代码如下</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">Promise&lt;std::string&gt; promise;</span><br><span class="line">---------------thread x-------------</span><br><span class="line">Future&lt;std::string&gt; future = promise.<span class="built_in">Future</span>();</span><br><span class="line">future.<span class="built_in">Get</span>(); <span class="comment">// Blocks!</span></span><br><span class="line">---------------thread y-------------</span><br><span class="line">promise.<span class="built_in">Set</span>(<span class="string">&quot;...&quot;</span>); <span class="comment">// Non-blocking!</span></span><br></pre></td></tr></table></figure>
+
+<p>接下来我们用future来修改SpellCheck函数</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 这里我们异步地请求Post方法，并通过future拿到对应的返回值</span></span><br><span class="line"><span class="function">Future&lt;std::string&gt; <span class="title">SpellCheck</span><span class="params">(std::string text)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">auto</span> body = http::<span class="built_in">UrlEncode</span>(&#123;<span class="string">&quot;text&quot;</span>, text&#125;);</span><br><span class="line">  Promise&lt;std::string&gt; promise;</span><br><span class="line">  <span class="keyword">auto</span> future = promise.<span class="built_in">Future</span>();</span><br><span class="line">  http::<span class="built_in">AsyncPost</span>(</span><br><span class="line">      <span class="string">&quot;https://www.online-spellcheck.com&quot;</span> ,</span><br><span class="line">      body,</span><br><span class="line">      [promise = std::<span class="built_in">move</span>(promise)]( <span class="keyword">auto</span>&amp;&amp; response) &#123;</span><br><span class="line">        <span class="keyword">if</span> (response.code != <span class="number">200</span>) promise.<span class="built_in">Fail</span>(response.code); </span><br><span class="line">        <span class="keyword">else</span> promise.<span class="built_in">Set</span>(response.body);</span><br><span class="line">      &#125;);</span><br><span class="line">  <span class="keyword">return</span> future;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>假如现在我们的SpellCheck和GrammarCheck两个函数都试用了future&#x2F;promise的方法改造，那么我们会碰到接下来的问题</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">std::string text = <span class="string">&quot;...&quot;</span>; </span><br><span class="line">text = <span class="built_in">SpellCheck</span>(text). <span class="built_in">Get</span>(); <span class="comment">// Blocks!</span></span><br><span class="line">text = <span class="built_in">GrammarCheck</span>(text). <span class="built_in">Get</span>(); <span class="comment">// Blocks!</span></span><br></pre></td></tr></table></figure>
+
+<p>可以看到这两个方法的Get都会是阻塞的，那不相当于我们的代码又变成串行阻塞的了吗？这里的函数逻辑是在完成spellcheck后再调用grammarcheck，也就是说这里的Control Flow应该是<code>SpellCheck -&gt; GrammarCheck</code>那么这里如果可以让两个future拥有future a异步执行完了之后(then)执行b的语义似乎能避免对应的阻塞，假设C++的future能提供类似JavaScript的<code>.then</code>接口继续讨论这个问题.那么对应代码或许可以这样修改</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 这里将SpellCheck和GrammerCheck组合到一个函数SpellAndGrammarCheck之中</span></span><br><span class="line"><span class="function">Future&lt;std::string&gt; <span class="title">SpellAndGrammarCheck</span> <span class="params">(std::string text)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">return</span> <span class="built_in">SpellCheck</span>(text)</span><br><span class="line">      .<span class="built_in">Then</span>([](<span class="keyword">auto</span>&amp;&amp; text) &#123;</span><br><span class="line">        <span class="keyword">return</span> <span class="built_in">GrammarCheck</span>(text);<span class="comment">// Can be a Future&lt;T&gt; or T.</span></span><br><span class="line">      &#125;);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>到这里我们似乎解决了等待的问题.</p>
+<h3 id="如何解决状态的问题"><a href="#如何解决状态的问题" class="headerlink" title="如何解决状态的问题"></a>如何解决状态的问题</h3><p>使用future&#x2F;promises执行代码的一些性质</p>
+<ul>
+<li>因为代码中从不block所以可以只有一个线程便执行(类型JavaScript的模型，只有基于libuv提供的单线程event loop)</li>
+<li>然后代码并不一定能原子地执行，因为当代码中出现必须等待别的代码时就出现了交互(在不得不等待时会有别的代码被执行就是问题的关键)</li>
+<li>许多人称这种情况为”concurrency” vs parallelism因为这种模式给了你并发执行的错觉然而你并没有同时在执行</li>
+<li>但是你依旧得忍受并发执行所带来的同步问题</li>
+<li>也可以基于多线程执行代码</li>
+</ul>
+<p>可能的解决方案如下：</p>
+<ul>
+<li>1963年提出了mutexes和semaphore</li>
+<li>1973年提出了actors</li>
+<li>1974年提出了monitors</li>
+<li>1978年提出了communicating sequential processes</li>
+<li>1987年提出了statecharts</li>
+</ul>
+<p>其中mutexes，semaphores和monitors都是基于threads的解决方案<br>而actors，csp，statecharts是没有线程的解决方案</p>
+<p>没有线程会是什么情况？<br>没有线程的抽象包含了执行模型&#x2F;语义和状态的同步<br>actors包括了执行，同步，状态</p>
+<p>包括得更多 -&gt; 更高级的抽象能带来</p>
+<ul>
+<li>更容易理解</li>
+<li>更容易在更多的硬件和平台运行</li>
+<li>更容易优化</li>
+</ul>
+<p>actors的性质</p>
+<ul>
+<li>本地可修改状态</li>
+<li>消息队列</li>
+<li>一次接受并处理一条消息</li>
+<li>actors之间发送消息是非阻塞的</li>
+<li>不论是local还是distributed模式都是同样的编程模型</li>
+</ul>
+<p>下面我们看一段在C++中的actor模型的代码</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">struct</span> <span class="title class_">MyActor</span> : <span class="keyword">public</span> Actor &#123;</span><br><span class="line">  <span class="function"><span class="type">void</span> <span class="title">Receive</span><span class="params">(ActorId sender, Message message, <span class="type">void</span>* arguments)</span> <span class="keyword">override</span> </span>&#123;</span><br><span class="line">    <span class="keyword">switch</span> (message) &#123;</span><br><span class="line">      <span class="keyword">case</span> MESSAGE_FOO_REQUEST:</span><br><span class="line">        <span class="keyword">auto</span>* request = (FooRequest*) arguments;</span><br><span class="line">        ...</span><br><span class="line">        <span class="built_in">Send</span>(sender, MESSAGE_FOO_RESPONSE, response);</span><br><span class="line">        <span class="keyword">break</span>;</span><br><span class="line">      <span class="keyword">case</span> MESSAGE_BAR_REQUEST:</span><br><span class="line">      ...</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<p>只需要实现不同的request，actor在接受到 message后就能派发到对应的actor上去。<br><img src="/%E8%AF%91From-Eager-Futures-Promises-to-Lazy-Continuations/actors%E4%BA%A4%E4%BA%92%E5%9B%BE.png" alt="actors (visualized)"></p>
+<p>如果对所有的方法上锁（类似java的synchronized）能不能做到同样的效果呢？<br><img src="/%E8%AF%91From-Eager-Futures-Promises-to-Lazy-Continuations/threads%E4%BA%A4%E4%BA%92%E5%9B%BE.png" alt="threads (visualized)"></p>
+<p>actor的性能如何？<br>对于数据经常需要被共享或者在执行资源间移动的并发程序没啥影响</p>
+<p>但是对于分布式和网络程序，数据经常只在别的机器上被共享，并且在任意的core之间交换数据会带来性能下降</p>
+<p>似乎通过actor我们解决了state的问题</p>
+<h2 id="libprocess"><a href="#libprocess" class="headerlink" title="libprocess"></a>libprocess</h2><p>作者在2009年的时候</p>
+<ul>
+<li>在UCB 构建分布式系统Apache Mesos</li>
+<li>使用了C++来避免如Java的gc语言会带来的运行时不确定性问题</li>
+<li>希望使用actors</li>
+</ul>
+<p>于是在打造libprocess的时候他们想到了将futures&#x2F;promises和actors结合！</p>
+<h3 id="为什么actor需要future-x2F-promises"><a href="#为什么actor需要future-x2F-promises" class="headerlink" title="为什么actor需要future&#x2F;promises"></a>为什么actor需要future&#x2F;promises</h3><p>回首上面的actor代码会发现很难描述清楚actor之间的执行流</p>
+<ul>
+<li>在actor 模型上收发信息就如同编写汇编语言一样（译者注：编写难度和体验）尽管他们确实解决了state的问题</li>
+<li>message的处理就如同goto一样！而goto是非结构化的，是不被提倡的</li>
+</ul>
+<p>抛弃goto这个玩意，我们想要的是</p>
+<ul>
+<li>非阻塞的函数调用(返回future)</li>
+<li>函数的可组合性(Then)</li>
+</ul>
+<p>就像如下的代码</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">MyActor actor;</span><br><span class="line"><span class="keyword">auto</span> future = actor.<span class="built_in">Foo</span>(...)</span><br><span class="line">  .<span class="built_in">Then</span>([](<span class="keyword">auto</span>&amp;&amp; response) &#123;</span><br><span class="line">    <span class="keyword">return</span> ...;</span><br><span class="line">  &#125;);</span><br></pre></td></tr></table></figure>
+
+<p>libprocess actor的伪代码如下</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">struct</span> <span class="title class_">MyActor</span> : <span class="keyword">public</span> Actor &#123;</span><br><span class="line">  <span class="function">Future&lt;FooResponse&gt; <span class="title">Foo</span><span class="params">(FooRequest request)</span> </span>&#123;</span><br><span class="line">    <span class="comment">// Execute the “message” on the actor ‘self()’.                                                                                                                </span></span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">On</span>(<span class="built_in">self</span>(), [<span class="keyword">this</span>, request]() &#123;</span><br><span class="line">      FooResponse response;</span><br><span class="line">      ...</span><br><span class="line">      <span class="keyword">return</span> response;</span><br><span class="line">    &#125;);</span><br><span class="line">  &#125;</span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<p>注意这里On(self(), closure)的语义是在self()也就是这个actor实例本身这个执行资源上执行closure中的内容</p>
+<p>自然的也可以在函数中通过then组合调用别的逻辑</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">struct</span> <span class="title class_">MyActor</span> : <span class="keyword">public</span> Actor &#123;</span><br><span class="line">  <span class="function">Future&lt;FooResponse&gt; <span class="title">Foo</span><span class="params">(FooRequest request)</span> </span>&#123;</span><br><span class="line">    <span class="comment">// Execute the “message” on the actor ‘self()’.                                                                                                                </span></span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">On</span>(<span class="built_in">self</span>(), [<span class="keyword">this</span>, request]() &#123;</span><br><span class="line">      ...</span><br><span class="line">      <span class="keyword">return</span> <span class="built_in">SomeOtherFunctionReturningAFuture</span>()</span><br><span class="line">        .<span class="built_in">Then</span>([](<span class="keyword">auto</span>&amp;&amp; value) &#123;</span><br><span class="line">           ...</span><br><span class="line">        &#125;);</span><br><span class="line">    &#125;);</span><br><span class="line">  &#125;</span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<h3 id="why-futures-x2F-promises-need-actors"><a href="#why-futures-x2F-promises-need-actors" class="headerlink" title="why futures&#x2F;promises need actors"></a>why futures&#x2F;promises need actors</h3><p>观察一下下面这段代码</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">struct</span> <span class="title class_">MyObject</span> &#123;</span><br><span class="line">  <span class="function">Future&lt;<span class="type">void</span>&gt; <span class="title">SomeMember</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">SomeFunction</span>()</span><br><span class="line">      .<span class="built_in">Then</span>([](<span class="keyword">auto</span>&amp;&amp; value) &#123;</span><br><span class="line">        <span class="comment">// Where should this lambda run?????                                                                                                                   </span></span><br><span class="line">        ...</span><br><span class="line">      &#125;);</span><br><span class="line">  &#125;</span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<p><code>Then</code>之中的函数逻辑应该运行在什么之上呢？一个简单的想法是直接使用<code>SomeFunction</code>返回的future所关联的promise所在的执行资源之上</p>
+<p>完善一下上面的代码可能会是这样</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">struct</span> <span class="title class_">MyObject</span> &#123;</span><br><span class="line">  <span class="function">Future&lt;<span class="type">void</span>&gt; <span class="title">SomeMember</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">SomeFunction</span>()</span><br><span class="line">      .<span class="built_in">Then</span>([<span class="keyword">this</span>](<span class="keyword">auto</span>&amp;&amp; value) &#123;</span><br><span class="line">        <span class="comment">// Where should this lambda run?????                                                                                                                    </span></span><br><span class="line">        std::unique_lock&lt;std::mutex&gt; <span class="built_in">lock</span>(mutex_);</span><br><span class="line">        i += value;</span><br><span class="line">      &#125;);</span><br><span class="line">  &#125;</span><br><span class="line"> <span class="keyword">private</span>:</span><br><span class="line">  <span class="type">int</span> i_;</span><br><span class="line">  std::mutex mutex_;</span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<p>这可能会带来一个问题：在SomeFunction对应的promise的执行逻辑在调用<code>promise.Set()</code>的时候可能是阻塞的(可以理解成执行promise的逻辑和执行Then的逻辑可能会并行，这里就有锁会带来的同步代价)<br>或许可以使用asyncmutex试图解决这个问题</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">struct</span> <span class="title class_">MyObject</span> &#123;</span><br><span class="line">  <span class="function">Future&lt;<span class="type">void</span>&gt; <span class="title">SomeMember</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">SomeFunction</span>()</span><br><span class="line">      .<span class="built_in">Then</span>([<span class="keyword">this</span>](<span class="keyword">auto</span>&amp;&amp; value) &#123;</span><br><span class="line">        <span class="comment">// Where should this lambda run?????                                                                                                                    </span></span><br><span class="line">        <span class="keyword">return</span> mutex_.<span class="built_in">Acquire</span>()</span><br><span class="line">          .<span class="built_in">Then</span>([<span class="keyword">this</span>]() &#123;</span><br><span class="line">            i += value;</span><br><span class="line">            mutex_.<span class="built_in">Release</span>();</span><br><span class="line">          &#125;);</span><br><span class="line">      &#125;);</span><br><span class="line">  &#125;</span><br><span class="line"> <span class="keyword">private</span>:</span><br><span class="line">  <span class="type">int</span> i_;</span><br><span class="line">  AsyncMutex mutex_;</span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<p>这里调用<code>Release()</code>将要&#x2F;必须执行一个不会block的waiter，这也可能带来不确定的执行。</p>
+<p>如果能够保证<code>Then</code>的内容严格在actor执行完<code>SomeFunction()</code>之后执行就能够避免上文中非确定性执行带来的同步问题</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">struct</span> <span class="title class_">MyObject</span> : <span class="keyword">public</span> Actor &#123;</span><br><span class="line">  <span class="function">Future&lt;<span class="type">void</span>&gt; <span class="title">SomeMember</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">SomeFunction</span>()</span><br><span class="line">      .<span class="built_in">Then</span>(<span class="built_in">DeferOn</span>(<span class="built_in">self</span>(), [<span class="keyword">this</span>](<span class="keyword">auto</span>&amp;&amp; value) &#123;  <span class="comment">// Then之中的内容之后会在同一个actor的执行资源上执行</span></span><br><span class="line">        i_ += value;</span><br><span class="line">      &#125;));</span><br><span class="line">  &#125;</span><br><span class="line"> <span class="keyword">private</span>:</span><br><span class="line">  <span class="type">int</span> i_;</span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>上面的方式中actor提供了执行<code>Then</code>(continuation)的executor资源</li>
+<li>设置promise非常快是非阻塞的(DeferOn保证了在set之后才会执行Then之中的逻辑)</li>
+<li>无需同步</li>
+</ul>
+<h2 id="revisiting-the-problem"><a href="#revisiting-the-problem" class="headerlink" title="revisiting the problem"></a>revisiting the problem</h2><p>重新看一下SpellAndGrammerCheck函数</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">std::string <span class="title">SpellAndGrammarCheck</span><span class="params">(std::string text)</span> </span>&#123; </span><br><span class="line">  text = <span class="built_in">SpellCheck</span>(text);</span><br><span class="line">  <span class="keyword">return</span> <span class="built_in">GrammarCheck</span>(text);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这段代码是顺序的，非并行的，即使并发执行也没有状态需要同步<br>修改成Future和Then的方式</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">Future&lt;std::string&gt; <span class="title">SpellAndGrammarCheck</span><span class="params">(std::string text)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">return</span> <span class="built_in">SpellCheck</span>(text)</span><br><span class="line">      .<span class="built_in">Then</span>([](<span class="keyword">auto</span>&amp;&amp; text) &#123;</span><br><span class="line">        <span class="keyword">return</span> <span class="built_in">GrammarCheck</span>(text);</span><br><span class="line">      &#125;);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这之中会申请锁并且需要动态分配内存</p>
+<h3 id="是什么需要申请锁以及动态分配内存"><a href="#是什么需要申请锁以及动态分配内存" class="headerlink" title="是什么需要申请锁以及动态分配内存"></a>是什么需要申请锁以及动态分配内存</h3><p>我们先展开SpellCheck的逻辑</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">Future&lt;std::string&gt; <span class="title">SpellAndGrammarCheck</span> <span class="params">(std::string text)</span> </span>&#123;</span><br><span class="line">  ...</span><br><span class="line">  <span class="keyword">auto</span> future = promise.<span class="built_in">future</span>();</span><br><span class="line">  http::<span class="built_in">AsyncPost</span>( <span class="comment">// Non-blocking! Returns immediately!</span></span><br><span class="line">      ...,</span><br><span class="line">      [promise = std::<span class="built_in">move</span>(promise)]( <span class="keyword">auto</span>&amp;&amp; response) &#123;</span><br><span class="line">        promise.<span class="built_in">Set</span>(response.body);</span><br><span class="line">      &#125;);</span><br><span class="line">  <span class="keyword">return</span> future</span><br><span class="line">      .<span class="built_in">Then</span>([](<span class="keyword">auto</span>&amp;&amp; text) &#123;</span><br><span class="line">        <span class="keyword">return</span> <span class="built_in">GrammarCheck</span>(text);</span><br><span class="line">      &#125;);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>上面的代码中在<code>promise.Set(response.body)</code>与continuation通过<code>.Then()</code>组合之间存在race, 这两个动作可能在同时发生，于此我们需要锁来同步. 另外promise也可能在continuation被组合起来以前设置，所以需要动态内存分配.</p>
+<p>有什么办法避免锁以及这一次动态内存分配吗？</p>
+<h2 id="evolution-of-libprocess"><a href="#evolution-of-libprocess" class="headerlink" title="evolution of libprocess"></a>evolution of libprocess</h2><h3 id="避免锁开销"><a href="#避免锁开销" class="headerlink" title="避免锁开销"></a>避免锁开销</h3><p>上面的逻辑中SpellCheck的future的组装(将GrammarCheck的逻辑组合在一起)和promise的set操作之间是可能并行的，所以需要锁来同步，但如果将代码的逻辑做一下简单的修改，修改成SpellCheck中AsyncPost的逻辑执行完之后执行一个回调函数就可以避免锁的同步(也就是保证了GrammerCheck的逻辑一定在SpellCheck之后)</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// f的逻辑其实就是GrammerCheck</span></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">SpellCheck</span><span class="params">(std::string text, std::function&lt;<span class="type">void</span>(std::string)&gt; f)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">auto</span> body = http::<span class="built_in">UrlEncode</span>(&#123;<span class="string">&quot;text&quot;</span>, text&#125;);</span><br><span class="line">  </span><br><span class="line">  http::<span class="built_in">AsyncPost</span>(</span><br><span class="line">      <span class="string">&quot;https://www.online-spellcheck.com&quot;</span> ,</span><br><span class="line">      body,</span><br><span class="line">      [f = std::<span class="built_in">move</span>(f)](<span class="keyword">auto</span>&amp;&amp; response) &#123;</span><br><span class="line">        <span class="built_in">f</span>(response.body); <span class="comment">// Invoke continuation without locks!</span></span><br><span class="line">      &#125;);</span><br><span class="line">  <span class="keyword">return</span> future;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>也可以修改成模板函数</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">template</span> &lt;<span class="keyword">typename</span> K&gt;</span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">SpellCheck</span><span class="params">(std::string text, K k)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">auto</span> body = http::<span class="built_in">UrlEncode</span>(&#123;<span class="string">&quot;text&quot;</span>, text&#125;);</span><br><span class="line">  http::<span class="built_in">AsyncPost</span>(</span><br><span class="line">      <span class="string">&quot;https://www.online-spellcheck.com&quot;</span> ,</span><br><span class="line">      body,</span><br><span class="line">      [k = std::<span class="built_in">move</span>(k)](<span class="keyword">auto</span>&amp;&amp; response) &#123;</span><br><span class="line">        <span class="keyword">if</span> (response.code != <span class="number">200</span>)  k.<span class="built_in">Fail</span>(response.code); </span><br><span class="line">        <span class="keyword">else</span> k.<span class="built_in">Success</span>(response.body);</span><br><span class="line">      &#125;);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>译者注：作者在演讲里表示在他读大学的时候他们都用K来表示continuation，所以这里模板里他也用的是K而不是C</p>
+<h3 id="避免动态内存分配"><a href="#避免动态内存分配" class="headerlink" title="避免动态内存分配"></a>避免动态内存分配</h3><p>以上面的模板函数为例,到底是在什么地方分配了内存呢？这里需要进入Http::AsyncPost的实现之中</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">namespace</span> http &#123;</span><br><span class="line"><span class="keyword">template</span> &lt;<span class="keyword">typename</span> K&gt;</span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">Post</span><span class="params">(std::string url, std::string body, K k)</span> </span>&#123;</span><br><span class="line">  <span class="type">void</span>* data = <span class="keyword">new</span> <span class="built_in">K</span>(std::<span class="built_in">move</span>(k));</span><br><span class="line">  ...</span><br><span class="line">  <span class="built_in">http_post</span>(url, body, data, +[](<span class="type">long</span> code, <span class="type">const</span> <span class="type">char</span>* body, <span class="type">void</span>* data) &#123;</span><br><span class="line">    K* k = <span class="built_in">reinterpret_cast</span>&lt;K*&gt;(data);</span><br><span class="line">    k-&gt;<span class="built_in">Success</span>(http::Response&#123;code, body&#125;);</span><br><span class="line">    <span class="keyword">delete</span> k;</span><br><span class="line">  &#125;);</span><br><span class="line">&#125;</span><br><span class="line">&#125; <span class="comment">// namespace http</span></span><br></pre></td></tr></table></figure>
+
+<p>在Post方法中还是分配了内存.</p>
+<p>💡 如果将continuation K作为函数返回的结果中的一部分是不是就避免了分配？</p>
+<p>接受一个continuation作为参数并返回一个continuation作为结果(返回值中组合&#x2F;包括了作为参数传递的continuation)</p>
+<p>修改一下上面的Post方法的实现，与其在函数的栈上分配一个堆上的void*，不如在函数中定义一个仅存在于该函数的struct并返回一个该struct的值</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">template</span> &lt;<span class="keyword">typename</span> K&gt;</span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">Post</span><span class="params">(std::string url, std::string body, K k)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">struct</span> <span class="title class_">Continuation</span> &#123;</span><br><span class="line">    <span class="function"><span class="type">void</span> <span class="title">Start</span><span class="params">()</span> </span>&#123;</span><br><span class="line">      <span class="type">void</span>* data = &amp;k;</span><br><span class="line">      <span class="built_in">http_post</span>(url, body, data, +[]( <span class="type">long</span> code, <span class="type">const</span> <span class="type">char</span>* body, <span class="type">void</span>* data) </span><br><span class="line">      &#123;</span><br><span class="line">        K* k = <span class="built_in">reinterpret_cast</span>&lt;K*&gt;(data);</span><br><span class="line">        k-&gt;<span class="built_in">Success</span>( http::Response&#123;code, body&#125;);</span><br><span class="line">      &#125;);</span><br><span class="line">    &#125;</span><br><span class="line">    std::string url, body;</span><br><span class="line">    K k;</span><br><span class="line">  &#125;;</span><br><span class="line">  <span class="keyword">return</span> Continuation&#123;std::<span class="built_in">move</span>(url), std::<span class="built_in">move</span>(body), std::<span class="built_in">move</span>(k)&#125;;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>可以看到这段代码讲传递进入的url,body,k都传递进了struct Continuation之中，之后这三个值的生命周期将同返回的Continuation value绑定，在value析构时一同回收，同时这里的内存分配也只有一个栈上的值类型Continuation的内存分配.</p>
+<h3 id="lazy-continuation"><a href="#lazy-continuation" class="headerlink" title="lazy continuation"></a>lazy continuation</h3><figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">auto</span> k = http::<span class="built_in">Post</span>(url, body, <span class="comment">/* k&#x27; */</span>);</span><br><span class="line">k.<span class="built_in">Start</span>();</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>返回值类型是”computational graph”</li>
+<li>这个graph是lazy的,当我们拿到这个graph时什么都不会发生(tradeoff for dynamic allocation) 并且如果我们想执行他的逻辑就必须显式调用start</li>
+<li>graph可以分配在栈上或者堆上</li>
+<li>在完成以前内存必须有效</li>
+</ul>
+<h2 id="eventuals"><a href="#eventuals" class="headerlink" title="eventuals"></a>eventuals</h2><p>作者将lazy continuation称为eventuals.</p>
+<p>这一章的内容主要是介绍了eventuals并且通过eventuals将上文中传递continuation的代码风格进行了修正(传递continuation看着比较难看不符合人体工程学),译文会忽略这部分推导,感兴趣的读者可以访问<a target="_blank" rel="noopener" href="https://github.com/3rdparty/eventuals">eventuals</a>查看这个项目的信息.</p>
+<h2 id="scheduling"><a href="#scheduling" class="headerlink" title="scheduling"></a>scheduling</h2><p>本章节主要是探讨continuation应该在什么地方运行？回望下面这段代码</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">auto</span> <span class="title">Post</span><span class="params">(std::string url, std::string body)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">return</span> <span class="built_in">Eventual</span>&lt;http::Response&gt;([url, body]( <span class="keyword">auto</span>&amp; k) &#123;</span><br><span class="line">      <span class="keyword">using</span> K = std::<span class="type">decay_t</span>&lt;<span class="keyword">decltype</span>(k)&gt;;</span><br><span class="line">      <span class="type">void</span>* data = &amp;k;</span><br><span class="line">      <span class="built_in">http_post</span>(url, body, data, +[]( <span class="type">long</span> code, <span class="type">const</span> <span class="type">char</span>* body, <span class="type">void</span>* data) </span><br><span class="line">      &#123;</span><br><span class="line">        K* k = <span class="built_in">reinterpret_cast</span>&lt;K*&gt;(data);</span><br><span class="line">        k-&gt;<span class="built_in">Success</span>(http::Response&#123;code, body&#125;);</span><br><span class="line">      &#125;);</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;);</span><br></pre></td></tr></table></figure>
+
+<p>如果continuation是在event loop中被调用的,我们不希望continuation继续在event loop中继续运行(会阻塞其他的IO任务,IO线程池不应该执行太复杂的continuation任务)<br>同理,如果continuation是在actor中被调用的我们也不希望继续在actor的执行资源上运行，因为这样会阻塞别的message的处理</p>
+<p>回首看一下motivating exemple的代码</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">std::string <span class="title">SpellCheck</span><span class="params">(std::string text)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">auto</span> body = http::<span class="built_in">UrlEncode</span>(&#123;<span class="string">&quot;text&quot;</span>, text&#125;);</span><br><span class="line">  <span class="keyword">auto</span> response = http::<span class="built_in">Post</span>(<span class="string">&quot;https://www.online-spellcheck.com&quot;</span>, body);</span><br><span class="line">  <span class="keyword">return</span> response.body;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>得益于函数的抽象，我们可以分开考虑函数的接口以及实现.在这里不需要考虑http::Post到底是如何实现的.</p>
+<ul>
+<li>我们不关心是否在多线程上实现</li>
+<li>我们不关心是否在GPU上实现</li>
+<li>我们不关心是否在FPGA上实现</li>
+</ul>
+<p>然而，如果执行完http::Post方法并将控制流返回时我们发现现在正在</p>
+<ul>
+<li>于我们开始执行时不同的线程上执行时，我们会很惊讶</li>
+<li>一块GPU的执行逻辑上，而我们是在CPU上开始执行的，我们会很惊讶</li>
+</ul>
+<p>所以我们到底应该让continuation在什么地方执行呢？<br><strong>使用在你不得不等待以前正在使用的执行资源</strong></p>
+<p>否则(译者注：这里作者意思大概就是否则我们每一次都应该检查接下来的函数调用的文档&#x2F;实现去查看对应的函数会不会在eventloop上执行，如果是的话就需要自己通过ThreadPool::Schedule等方法重新调度),需要将代码进行类似的修改.</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">auto</span> <span class="title">SpellAndGrammarCheck</span> <span class="params">(std::string text)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">return</span> ThreadPool::<span class="built_in">Schedule</span>([text]() &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">SpellCheck</span>(text)</span><br><span class="line">        <span class="comment">// Rescheduling on thread pool because we looked at  </span></span><br><span class="line">        <span class="comment">// documentation of &#x27;SpellCheck()&#x27; and it continues on the</span></span><br><span class="line">        <span class="comment">// event loop which we don&#x27;t want to be on.</span></span><br><span class="line">        | ThreadPool::<span class="built_in">Schedule</span>([text]() &#123;</span><br><span class="line">             <span class="keyword">return</span> <span class="built_in">Then</span>([](<span class="keyword">auto</span>&amp;&amp; text) &#123;</span><br><span class="line">               <span class="keyword">return</span> <span class="built_in">GrammarCheck</span>(text);</span><br><span class="line">             &#125;);</span><br><span class="line">           &#125;);</span><br><span class="line">  &#125;);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>类似的内容可以查看std::execution的提案(译者后续的博文也会介绍这个提案).</p>
+<p>另外也介绍了在PLDI也有类似的工作</p>
+<p>“Composing Sorfware Efficiently with Lithe”(PLDI 2010)</p>
+<ul>
+<li>允许许多同时的scheduler负责计算图的子树</li>
+<li>所有的计算都拥有一个调度context</li>
+<li>对于冲洗提交任务给拥有context的接口提供了正式的接口</li>
+</ul>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2023/06/17/post-title-with-whitespace/" rel="prev" title="post title with whitespace">
+      <i class="fa fa-chevron-left"></i> post title with whitespace
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          Table of Contents
+        </li>
+        <li class="sidebar-nav-overview">
+          Overview
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E4%BB%8B%E7%BB%8D"><span class="nav-number">1.</span> <span class="nav-text">介绍</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#motivating-futures-x2F-promises-actors"><span class="nav-number">2.</span> <span class="nav-text">motivating futures&#x2F;promises + actors</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%A6%82%E4%BD%95%E8%A7%A3%E5%86%B3%E7%AD%89%E5%BE%85%E7%9A%84%E9%97%AE%E9%A2%98"><span class="nav-number">2.1.</span> <span class="nav-text">如何解决等待的问题</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%A6%82%E4%BD%95%E8%A7%A3%E5%86%B3%E7%8A%B6%E6%80%81%E7%9A%84%E9%97%AE%E9%A2%98"><span class="nav-number">2.2.</span> <span class="nav-text">如何解决状态的问题</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#libprocess"><span class="nav-number">3.</span> <span class="nav-text">libprocess</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E4%B8%BA%E4%BB%80%E4%B9%88actor%E9%9C%80%E8%A6%81future-x2F-promises"><span class="nav-number">3.1.</span> <span class="nav-text">为什么actor需要future&#x2F;promises</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#why-futures-x2F-promises-need-actors"><span class="nav-number">3.2.</span> <span class="nav-text">why futures&#x2F;promises need actors</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#revisiting-the-problem"><span class="nav-number">4.</span> <span class="nav-text">revisiting the problem</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E6%98%AF%E4%BB%80%E4%B9%88%E9%9C%80%E8%A6%81%E7%94%B3%E8%AF%B7%E9%94%81%E4%BB%A5%E5%8F%8A%E5%8A%A8%E6%80%81%E5%88%86%E9%85%8D%E5%86%85%E5%AD%98"><span class="nav-number">4.1.</span> <span class="nav-text">是什么需要申请锁以及动态分配内存</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#evolution-of-libprocess"><span class="nav-number">5.</span> <span class="nav-text">evolution of libprocess</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E9%81%BF%E5%85%8D%E9%94%81%E5%BC%80%E9%94%80"><span class="nav-number">5.1.</span> <span class="nav-text">避免锁开销</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E9%81%BF%E5%85%8D%E5%8A%A8%E6%80%81%E5%86%85%E5%AD%98%E5%88%86%E9%85%8D"><span class="nav-number">5.2.</span> <span class="nav-text">避免动态内存分配</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#lazy-continuation"><span class="nav-number">5.3.</span> <span class="nav-text">lazy continuation</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#eventuals"><span class="nav-number">6.</span> <span class="nav-text">eventuals</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#scheduling"><span class="nav-number">7.</span> <span class="nav-text">scheduling</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">John Doe</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">3</span>
+          <span class="site-state-item-name">posts</span>
+        </a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2023</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">John Doe</span>
+</div>
+  <div class="powered-by">Powered by <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://muse.theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Muse</a>
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/muse.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
