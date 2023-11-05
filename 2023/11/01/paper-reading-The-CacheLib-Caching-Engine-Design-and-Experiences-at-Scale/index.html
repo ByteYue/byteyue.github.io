@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 6.3.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"example.com","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="Abstract在过去每个团队都可能维护一套自己的特化的cache. 这样的方式无视了不同cache系统共有的问题, 极大增加了部署，维护以及扩容的成本.本文主要介绍CacheLib——Facebook内部已经广泛应用在CDN，存储和应用数据cache上. 坐着阐述了各个生产环节workload的特质以及FB内部的应用场景如何影响着决策. 描述了FB内部cache如何演化的, 也讨论了对未来的ca">
+<meta property="og:type" content="article">
+<meta property="og:title" content="paper reading: The CacheLib Caching Engine: Design and Experiences at Scale">
+<meta property="og:url" content="http://example.com/2023/11/01/paper-reading-The-CacheLib-Caching-Engine-Design-and-Experiences-at-Scale/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="Abstract在过去每个团队都可能维护一套自己的特化的cache. 这样的方式无视了不同cache系统共有的问题, 极大增加了部署，维护以及扩容的成本.本文主要介绍CacheLib——Facebook内部已经广泛应用在CDN，存储和应用数据cache上. 坐着阐述了各个生产环节workload的特质以及FB内部的应用场景如何影响着决策. 描述了FB内部cache如何演化的, 也讨论了对未来的ca">
+<meta property="og:locale" content="en_US">
+<meta property="article:published_time" content="2023-11-01T15:21:57.000Z">
+<meta property="article:modified_time" content="2023-11-05T08:28:38.939Z">
+<meta property="article:author" content="John Doe">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="http://example.com/2023/11/01/paper-reading-The-CacheLib-Caching-Engine-Design-and-Experiences-at-Scale/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'en'
+  };
+</script>
+
+  <title>paper reading: The CacheLib Caching Engine: Design and Experiences at Scale | Hexo</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="Toggle navigation bar">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">Hexo</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>Home</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-about"></i>About</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>Archives</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="en">
+    <link itemprop="mainEntityOfPage" href="http://example.com/2023/11/01/paper-reading-The-CacheLib-Caching-Engine-Design-and-Experiences-at-Scale/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="John Doe">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Hexo">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          paper reading: The CacheLib Caching Engine: Design and Experiences at Scale
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">Posted on</span>
+
+              <time title="Created: 2023-11-01 23:21:57" itemprop="dateCreated datePublished" datetime="2023-11-01T23:21:57+08:00">2023-11-01</time>
+            </span>
+              <span class="post-meta-item">
+                <span class="post-meta-item-icon">
+                  <i class="fa fa-calendar-check-o"></i>
+                </span>
+                <span class="post-meta-item-text">Edited on</span>
+                <time title="Modified: 2023-11-05 16:28:38" itemprop="dateModified" datetime="2023-11-05T16:28:38+08:00">2023-11-05</time>
+              </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h2 id="Abstract"><a href="#Abstract" class="headerlink" title="Abstract"></a>Abstract</h2><p>在过去每个团队都可能维护一套自己的特化的cache. 这样的方式无视了不同cache系统共有的问题, 极大增加了部署，维护以及扩容的成本.<br>本文主要介绍CacheLib——Facebook内部已经广泛应用在CDN，存储和应用数据cache上. 坐着阐述了各个生产环节workload的特质以及FB内部的应用场景如何影响着决策. 描述了FB内部cache如何演化的, 也讨论了对未来的cache研究和设计能带来哪些暗示.</p>
+<h2 id="Introduction"><a href="#Introduction" class="headerlink" title="Introduction"></a>Introduction</h2><p>FB内部架构里大量的系统都使用了cache,包括CDB caches, key-value application caches, social-graph caches, storage cache, database cache, media caches等. 这些cache系统最初都是单独设计实现并维护的. 最初的思路是单独设计针对不同场景优化以此满足复杂的一致性协议，更好地利用定制化数据结构，并且对特定的硬件平台优化.</p>
+<p>尽管各种cache有一些不同点，但他们也有很多相同的点: 都需要百万级的qps, cache set大到需要flash和DRAM都使用, 同时必须容忍系统更新引起的频繁重启(FB在Fail at Scale里提过他们更新部署是很频繁的). 随着FB的发展，这些cache系统也越来越多, 维护这么多系统的代价也是很高的. 很多重复的问题在不同的系统上被重复地解决多次. 同时这样多系统的维护也让很多系统上的系统调优知识无法有效共享. 因此FB在考虑了泛用性和特化的tradeoff之后选择了泛用性. 虽然这会在某些特殊的系统上丢失一部分特殊领域的优化，但是减轻了代码开发的负担也增加了系统协调性.</p>
+<p>最后FB开启了CacheLib的开发. CacheLib作为一个C++库提供了cache功能所必需的核心功能, 包括: 高效的cache索引实现, 驱逐策略, 为DRAM和flash caches的稳定优化. 同时提供给用户简单，线程安全的接口.</p>
+<h3 id="Lessons-Learned-from-CacheLib"><a href="#Lessons-Learned-from-CacheLib" class="headerlink" title="Lessons Learned from CacheLib"></a>Lessons Learned from CacheLib</h3><p>**特化的cache系统可以同时也应该构建于通用的cache系统之上.**一方面一套统一的代码更利于维护和开发，另一个方面业务部门可以通过在core系统外围开启不同功能选择不同配置以定制化需求. 同时统一的系统的运维经验，调优经验，方便整理的文档也利于开发者分享(搞不好还利于减轻oncall的人的压力).</p>
+<p><strong>生产场景的workload需要大规模饿环境</strong>.以往的benchmark采用的是参数为.9的Zipf popularity model. 基于这个模型会认为DRAM-based缓存已经可以应对大多数场景. FB的场景里面cache系统需要能够应对massive request. 所以采用了flash.</p>
+<h2 id="Motivation-Caching-Use-Cases"><a href="#Motivation-Caching-Use-Cases" class="headerlink" title="Motivation: Caching Use Cases"></a>Motivation: Caching Use Cases</h2><p>这一章以6个FB内部的生产系统为例介绍不同的业务对cache的需求是什么</p>
+<h3 id="Hierarchical-and-geo-distributed-caches"><a href="#Hierarchical-and-geo-distributed-caches" class="headerlink" title="Hierarchical and geo-distributed caches"></a>Hierarchical and geo-distributed caches</h3><p>FB的CDN服务专注于为请求静态资源的HTTP请求服务. 使用CDN的目标之一是减少因为cache miss引起的跨区域网络传输(比如在亚洲要是需要请求到北美的服务器那延迟肯定很低). 在FB内部每台CDN都是使用local cache，同时包含flash和DRAM.</p>
+<h3 id="Application-look-aside-caches"><a href="#Application-look-aside-caches" class="headerlink" title="Application look-aside caches"></a>Application look-aside caches</h3><p>web应用的cache需求非常广泛. 可能是某条db的查询结果(比如查询库存), 查询用户数据等. 这种需求一般是应用通过RPC访问一系列的共享cache服务. 每一个cache服务都由一个庞大的分布式cache系统组成(其实就很类似互联网应用中各种各样的cache, 不过一般可能都是使用的redis的服务, 可以看下FB关于memcached的论文).</p>
+<h3 id="in-process-caches"><a href="#in-process-caches" class="headerlink" title="in-process caches"></a>in-process caches</h3><p>也有很多应用无法忍受remote cache的网络开销. 这个时候cachelib也可以发挥类似caffeine的作用，以进程内cache的方式发挥作用.</p>
+<h3 id="Machine-learning-model"><a href="#Machine-learning-model" class="headerlink" title="Machine learning-model"></a>Machine learning-model</h3><p>面向用户的ml应用经常基于用户和推荐内容的互动来作为训练的输入. 用户和内容的互动会先cache住以方便ml程序快速做出预测(类似于将用户的行为记录counter缓存在cache中，用户的counter的更新也能通过write through cache的方式更新，之后训练程序直接读取cache肯定比去storage  service里load更快). 另外相同的输入往往输出也相同，所以可以将相同输入对应的预测结果缓存在cache中.</p>
+<h3 id="Storage-backend-cache"><a href="#Storage-backend-cache" class="headerlink" title="Storage-backend cache"></a>Storage-backend cache</h3><p>持久化数据会按照blocks的方式存储在FB内部的集群中的spinning disks上. 即使在block storage server前使用了多层存储还是存在部分热点block的请求次数超过目标磁盘的IOPS的情况. Storage server会使用flash来缓存热点block. 为了支持byte-range请求和append操作，这些flash cache会和storage system stack紧密整合.</p>
+<h3 id="Database-page-buffer"><a href="#Database-page-buffer" class="headerlink" title="Database page buffer"></a>Database page buffer</h3><p>数据结构和小对象被存储在各种各样的数据库系统中. DB会利用page cache来提升吞吐并降低延迟, 为了保证一致性和事务性, page cache会和数据库logic紧密整合.</p>
+<p>目前除了database page buffer以外上诉其他场景cachelib都在fb内部使用了.</p>
+<h2 id="Shared-Challenges-Across-Caching-Systems-at-Facebook"><a href="#Shared-Challenges-Across-Caching-Systems-at-Facebook" class="headerlink" title="Shared Challenges Across Caching Systems at Facebook"></a>Shared Challenges Across Caching Systems at Facebook</h2><p>这一章介绍构建cache系统时普遍面临的问题.</p>
+<h3 id="Massive-Working-Sets"><a href="#Massive-Working-Sets" class="headerlink" title="Massive Working Sets"></a>Massive Working Sets</h3><p>working set的定义是在一个workload中能够从caching里面收益的对象的集合. 如果要达到相同的hit ratio, working set越大则需要越大的cache. 为了测量working sets, 必须同时考虑随着时间变化被看到的popular data(Popularity)和随着时间变化数据的欢迎度改变的程度(Churn).</p>
+<h4 id="Popularity"><a href="#Popularity" class="headerlink" title="Popularity"></a>Popularity</h4><p>表示每一个key在一定时间内在系统内所有objects间的相对受欢迎度. </p>
+<p>TODO: 这里贴图</p>
+<p>不恰当地说, 在Zipf分布里最受欢迎的20%的object接受了80%的请求. 但Zipf 分布的公式里第i受欢迎的object的相对频率是通过一个参数可以计算出来的. 相对的这个参数越低意味着更多的请求会发给popularity 分布的尾部，这也就需要更大的working set. (Lookaside系统的参数接近1， SocialGraph是0.55 CDN是0.7)</p>
+<h4 id="Churn"><a href="#Churn" class="headerlink" title="Churn"></a>Churn</h4><p>Churn表示随着新key的进入，working set的变化以及已经存在的key的popularity变化. churn会影响caching policy的设计。 高churn就增加了temporal locality的重要性. 也让caching police’s更难通过过去的access patten估计object的popularity.</p>
+<p>这些发现也限制了设计一套通用cache系统时的设计空间. 许多现有的系统一个cacheline最多存储一个单独的object(64B). 对于SocialGraph系统(一般是10B到20B)这就会很浪费. 另一个挑战是经常用于作为flash里面系统的in-memory index. 每一个object在索引上的负担在现有系统上也是不同的(8B-100B都有。如LookAside系统, 这意味着需要80GB-1TB的DRAM来索引1TB的flash上的数据).</p>
+<h3 id="Size大小多变"><a href="#Size大小多变" class="headerlink" title="Size大小多变"></a>Size大小多变</h3><p>Storage 和 CDN需求里常见的是64KB和128Kb的chunk，所以会把大的object拆分成chunk. 而Lookaside和SocialGraph里大小变化超过7个数量级.</p>
+<h3 id="Bursty-Traffic"><a href="#Bursty-Traffic" class="headerlink" title="Bursty Traffic"></a>Bursty Traffic</h3><p>用户的请求数量存在激增的情况. 通常在system领域会采用Poisson分布来描述请求, 但FB内部的采集数据显示和实际上请求到达的速率还是有很大的区别的. Lookaside场景相对Poisson分布波动较小. SocialGraph和Storage场景会有20%到30%做有的波动, CDN场景则存在很尖锐的波动. 请求到达速率的多变性让cache系统在高压导入场景很难有效提供资源给cache服务.</p>
+<h3 id="Resource-Management"><a href="#Resource-Management" class="headerlink" title="Resource Management"></a>Resource Management</h3><p>cache系统需要注意不能将系统可用资源全部消耗,尤其是DRAM-based的cache系统. 以in-process场景的cache为例, 因为需要cache的对象的size也是多变的，所以cache的内存消耗也是很难预测的. 如果消耗了太多内存很容易导致系统OOM程序直接退出.</p>
+<h3 id="Computationally-Costly-Query-for-Empty-Results"><a href="#Computationally-Costly-Query-for-Empty-Results" class="headerlink" title="Computationally Costly Query for Empty Results"></a>Computationally Costly Query for Empty Results</h3><p>在追踪用户关系的数据库查询中经常会出现query返回了空的情况. 这种查询很浪费数据库资源. 在SocialGraph场景中FB发现有55.6%的查询都是这种空结果查询. 剩余的44.4%的请求都是有效的对象，对应的cache命中率是86.5%. 如果不能cache住空结果, 对应的cache命中率会显著降低.</p>
+<h3 id="Updating-Cached-Data-Structures"><a href="#Updating-Cached-Data-Structures" class="headerlink" title="Updating Cached Data Structures"></a>Updating Cached Data Structures</h3><p>Cache应该能够有效支持结构化数据. 特别是对in-process场景. 应用程序经常会希望能够在不反序列化整个cached数据的情况下更新其中的特定fields.</p>
+<h3 id="Frequent-Restarts"><a href="#Frequent-Restarts" class="headerlink" title="Frequent Restarts"></a>Frequent Restarts</h3><p>最后，生产环境中的cache系统应该能过在频繁重启(可能是bug修复或者软件更新)的情况下稳定工作. 75%的Lookaside场景和95%的CDN场景的更新时间都小于7天. 即使是Storage和SocialGraph场景也会因为每月的维护需要重启cache进程. 大部分的cache系统是透明无感的，也就是说重启后就丢失了cache中的数据. 这对于大型的cache系统是很不友好的，可能需要很长的时间cache系统的命中率才能恢复到正常状态. 有的系统会采取warmup来缓解.</p>
+<p>笔者吐槽: 其实cachelib在程序非正常退出的情况下 cache也全部会丢失… 只有优雅退出的场景能保留cache内容.</p>
+<h2 id="Design-and-Implementation"><a href="#Design-and-Implementation" class="headerlink" title="Design and Implementation"></a>Design and Implementation</h2><p>FB认为要解决前两章的问题则cache系统应该有如下的feature:</p>
+<ul>
+<li>Thread-safe cache primitives: 以此简化应对bursty traffic的场景. 同时也简化了一致性和cache invalidation协议的实现.</li>
+<li>Transparent hybrid caching: 为了能够满足large working sets的需求，cachelib支持混合使用DRAM和flash。 Hybrid cache能够在每台节点提供TB级的cache能力. cachelib提供给programmer的统一的byte-address的抽象，让programmer无需担心底层的存储介质.</li>
+<li>Low resource overhead: Cachelib能够在占用低CPU和memory的情况下提供强劲的吞吐. 这使得其能够在和application混布的场景发挥作用(cache和application共享资源). 也让其在small objects很多的场景也能够顺利工作(不会出现前文中需要很大的资源才能维护cache index之类的情况).</li>
+<li>Structured items: Cachelib提供了原生的array和hashmap的实现. 可以在不发起serialization的情况下高效cache和修改.</li>
+<li>Dynamic resource monitoring, allocation, and OOM protection: cachelib会监控整个系统的内存使用.</li>
+<li>Warm restarts: 在重启程序时依旧保留cache的状态.</li>
+</ul>
+<h3 id="API设计"><a href="#API设计" class="headerlink" title="API设计"></a>API设计</h3><p>所有的api设计都围绕着一个叫Item的概念, 用来表示被cache的对象的抽象. Item能够用byte-address的方式访问cache中的object, 无需关心是cache在DRAM还是在flash中. ItemHandle是Item的使用接口，每产生一个handle就会对Item的引用计数+1，销毁时则-1. 除非Item的引用为0，否则不会被evict. 如果某个引用计数不为0的item被删除或者超时expires了，现存的他的itemhandle还是有效的，但是不会有新的itemhandle产生了.</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">ItemHandle <span class="title">allocate</span><span class="params">(PoolId id, Key key, <span class="type">uint32_t</span> size, <span class="type">uint32_t</span> ttlSecs = <span class="number">0</span>)</span></span>;</span><br><span class="line"><span class="function"><span class="type">bool</span> <span class="title">insertOrReplace</span><span class="params">(<span class="type">const</span> Itemhandle&amp; handle)</span></span>;</span><br><span class="line"><span class="function">ItemHandle <span class="title">find</span><span class="params">(Key key)</span></span>;</span><br><span class="line"><span class="function"><span class="type">void</span>* <span class="title">Item::getMemory</span><span class="params">()</span></span>;</span><br><span class="line"><span class="function"><span class="type">void</span>* <span class="title">Item::markNvmUnclean</span><span class="params">()</span></span>;</span><br><span class="line"><span class="function"><span class="type">bool</span> <span class="title">remove</span><span class="params">(Key key)</span></span>;</span><br></pre></td></tr></table></figure>
+
+<p>调用allocate时如果没有空间会先根据eviction policy来驱逐一个引用计数为0的Item. 新插入的Item可以设置TTL. 同时根据PoolId可以可以选择内存池以提供隔离性配置. 任何一个新的Item会在对对应的ItemHandle完成insertOrReplcae操作后才可见.</p>
+<p>要访问Item需要通过find方法根据Key拿到ItemHandle. 之后可以通过getMemory方法以非同步地方式零拷贝访问Item相关的内存. 如果需要原子性地更新一个Item, 可以先使用allocate分配对应的ItemHandle，然后通过调用insertOrReplace让更新可见。 CacheLib会忠实地执行用户的markNvmUnclean方法指示任何的修改. 最后，remove会删除key指定的object，也会invalidation cache或者删除对应的底层的object.</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">struct</span> <span class="title class_">MyType</span> &#123;</span><br><span class="line">    <span class="type">int</span> foo;</span><br><span class="line">    <span class="type">char</span> bar[<span class="number">10</span>];</span><br><span class="line">&#125;</span><br><span class="line">TypedHandleImpl&lt;Item, MyType&gt; typedHandle&#123;cache-&gt;<span class="built_in">find</span>(..)&#125;;</span><br></pre></td></tr></table></figure>
+
+<p>用户也可以如上面的代码一样自定义类型并使用CacheLib将他们cache起来. 也支持变长类型比如hashmap等.</p>
+<h3 id="Architecture-Overview"><a href="#Architecture-Overview" class="headerlink" title="Architecture Overview"></a>Architecture Overview</h3><p>CacheLib的设计目标是能够有足够的拓展性以及能够应对各种长度的size的object. 为了实现较低的per-object负载, 一个单独的CacheLib cache由多个子系统组成，每一个都对应一个特别的storage介质和object的size. CacheLib由一个DRAM cache和一个flash cache组成. Flash cache由LargeObjectCache(LOC, 为Item大于等于2KB的object服务)和SmallObjectSize(SOC, 为小于2KB的object服务).</p>
+<p>allocate函数的作用是从DRAM空间分配内存，对应的就可能会被DRAM中的存在的Item驱逐到flash或者直接丢弃. find函数则会先找DRAM然后LOC然后SOC. 如果是在DRAM中找到则返回的ItemHandle立刻就能使用，如果是在flash中找到则需要异步拉取，对应的Cachehandle会在Item被加载进DRAM会变得可用. 当发生cache miss时会返回一个空的ItemHandle.</p>
+<p><strong>DRAM cache</strong>. CacheLib在DRAM cache中使用链式hash表进行查找, DRAM cache可以被切分成带有不同eviction policy的pool(在allocate的时候通过PoolId指定).</p>
+<p>为了性能考虑cache 内存是通过伙伴系统来分配的. CacheLib使用4MB的slabs并且实现了自己的slab分配器. 每一个slab需要7B(3B给内部元数据，4B用来标识object大小). 对于不同业务来讲每一个slab ckass的大小是可以采用不同配置的(对于小于64B和大于4MB的情况在4.3节讨论对应的优化).</p>
+<p>对于不同的Slab系统也可以配置不同的eviction policy(CacheLib也能自定义开发新的policy). CacheLib会在Item上额外使用31B来支持这些对应的policy的配置.</p>
+<table>
+<thead>
+<tr>
+<th>Item metadata</th>
+<th>DRAM overhead</th>
+<th>Data type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Eviction policy state</td>
+<td>12B</td>
+<td>1<em>4B timestamp, 2</em>4B pointers</td>
+</tr>
+<tr>
+<td>Item creation timestamp</td>
+<td>4B</td>
+<td>4B timestamp</td>
+</tr>
+<tr>
+<td>Expiration time(for TTLs)</td>
+<td>4B</td>
+<td>4B timestamp</td>
+</tr>
+<tr>
+<td>Key size + object size</td>
+<td>4B</td>
+<td>4B size_t</td>
+</tr>
+<tr>
+<td>Reference counting</td>
+<td>2B</td>
+<td>13b public ref count, 3b internal count</td>
+</tr>
+<tr>
+<td>hash table chaining</td>
+<td>4B</td>
+<td>4B pointer</td>
+</tr>
+<tr>
+<td>Flags</td>
+<td>1B</td>
+<td>8 binary flags</td>
+</tr>
+</tbody></table>
+<p>为了保证metadata操作的原子性, Cachelib使用了细粒度Lock, 用户空间mutexes, C++院子操作等优化. 比如在LRU场景中，传统的方式里一个object被访问后会被放到most-recently-used的位置(在FB的场景中也很容易发生). CacheLib里每个Item在一段时间T内同一个Item不会被移动到MRU位置. 只要T比object在LRU list里走到尾端(也就是成为最不常用的那个)的时间短，这个方式都能有效的减少移动操作带来的contention. 另外FB也采用了比如flat combining的方式优化.</p>
+<p><strong>Flash cache</strong>. 从DRAM中淘汰后除了直接删除也可能会写入flash. CacheLib还必须处理flash cell的有限的写寿命.</p>
+<p>为了尽量减少写flash的速率，CacheLib会选择性地将object写回flash. 如果一个存在于flash的object在DRAM中没被修改过那么就不会写回flash. 否则CacheLib通过一个admission policy来决定是否写回flash. 默认配置是通过一个概率p来决定是否写回flash. 这个p可以通过对flash的写入速率进行控制.</p>
+<p>另一个考虑的因素是写放大(比如在写falsh时除了object的内容还有元数据). 不只是应用层的写放大还有设备层的. </p>
+<p>LOC存储的object大小都大于等于2KB，这个大小决定了在LOC中的独特的object的数量大概在百万级，所以可以通过一个内存中的B+树来进行索引. LOC使用分段B+树来存储flash中Item的位置. Items在LOC中的flash page里是4KB对齐的, 所以B+树中的flash location是一个4B的4KB对齐的地址. 也就是说LOC中最多能索引16TB的数据.</p>
+<p>LOC使用cache也进一步限制了DRAM index的size. Keys被hash成8B. 前4B表示B+树的segment, 后4B用来在对应segment里查找. LOG 在flash中也会存储整个key的内容，用来在load进DRAM后与进行hash的key进行比较以确定是否找到了对应的Item. 而不同size的object在flash上被存储在不同的partition，所以可以根据flash location直接判断object的size，这样就不需要在元数据里存储object的size了. 为了减少DRAM里存储的address的size，每一个4KB的flash page最多存储一个单独的object和对应的元数据. 因为LOC只存储超过2KB的object，这个策略是很space-efficient的. 因为LOC的read和write都是page粒度的，任何application级别的碎片化都会导致写放大.</p>
+<p>LOC的remove是按照region级别进行的。也就是说一下子可以删除一个region上的多个Item(顺序删除，提供删除的性能，也摊平flash erasure的开销). 默认情况下region是按照FIFO的方式进行严格顺序的erase的. 当然也可以采用类似LRU的方式进行region管理.</p>
+<p><strong>SOC</strong>. 因为SOC都是小于2KB的object，如果还是使用LOC那样的精确查找的方式会消耗非常多的内存，所以SOC采用的是近似索引. SOC将Key映射到不同的set. 每个set表示一个4KB的flash page. 一个flash page能存储多个objects. set中的objects是按照FIFO的顺序进行驱逐的. 为了加快查找效率，cachelib会给每个set在内存中维护一个8B的bloom filter.</p>
+<p>在SOC中控制写放大时很有挑战性的. 因为写一条object在flash上就是下刷4KB. 所以SOC需要有先进的admit policy来控制对SOC的写入.</p>
+<h3 id="Implementation-of-Advanced-Feature"><a href="#Implementation-of-Advanced-Feature" class="headerlink" title="Implementation of Advanced Feature"></a>Implementation of Advanced Feature</h3><h4 id="structured-items"><a href="#structured-items" class="headerlink" title="structured items"></a>structured items</h4><p>CacheLib原生支持arrays和map类型. 同时因为能提供raw access访问cached memory, 平坦的数据结构可以直接用cachelib api访问.</p>
+<h4 id="caching-large-and-small-objects"><a href="#caching-large-and-small-objects" class="headerlink" title="caching large and small objects"></a>caching large and small objects</h4><p>大于4MB的object会通过链表的方式将多个Item链到一起组成一个逻辑上的大item(每个item会使用4B的next pointer).</p>
+<p>针对小对象还有compact cache的功能用来存储小于cacheline的对象(一般64B或者128B). 相同key size，相同object size的objects会被存储在一个cache line之中. compact cache中每一个cacheline都是通过key hash索引的. cacheline之中会进行LRU. compact cache可以用来处理negative caching(后段查询返回空值的情况).</p>
+<h4 id="resource-monitoring"><a href="#resource-monitoring" class="headerlink" title="resource monitoring"></a>resource monitoring</h4><p>Cachelib会监控系统内存使用，系统free内存不足时释放自己的内存.</p>
+<h4 id="warm-restarts"><a href="#warm-restarts" class="headerlink" title="warm restarts"></a>warm restarts</h4><p>Cachelib使用POSIX shared memory来满足warmup需要.</p>
+<h2 id="Experience-and-Discussion"><a href="#Experience-and-Discussion" class="headerlink" title="Experience and Discussion"></a>Experience and Discussion</h2><h3 id="New-features-are-adopted-by-many-system"><a href="#New-features-are-adopted-by-many-system" class="headerlink" title="New features are adopted by many system"></a>New features are adopted by many system</h3><p>之前为别的cache系统开发的功能越来越多地被移植到cachelib上</p>
+<h3 id="Performance-improvements-help-many-systems"><a href="#Performance-improvements-help-many-systems" class="headerlink" title="Performance improvements help many systems"></a>Performance improvements help many systems</h3><p>因为是一套general的系统，在cachelib上的一点点改进在部署方都可能带来很大的收益.</p>
+<h3 id="Improved-stability"><a href="#Improved-stability" class="headerlink" title="Improved stability"></a>Improved stability</h3><p>Cachelib作为一个通用系统也避免了以前各种不同实现带来的不稳定性.</p>
+<h3 id="No-single-caching-system-dominates"><a href="#No-single-caching-system-dominates" class="headerlink" title="No single caching system dominates"></a>No single caching system dominates</h3><h3 id="Flash-caching-signals-a-paradigm-shift"><a href="#Flash-caching-signals-a-paradigm-shift" class="headerlink" title="Flash caching signals a paradigm shift"></a>Flash caching signals a paradigm shift</h3><p>有的人可能觉得cache的命中率够高时通过flash增加cache的容量收益不会很大. flash cache和dram cache的混合部署能降低纯DRAM的成本. </p>
+<p>另外传统的思路里认为cache只是用来节省磁盘访问时间的，但是考虑到现在的服务结构模式，除了磁盘访问延时以外还有更高的比如网络耗时，后端数据库执行耗时等, 使用flash缓存只要能避免这些耗时操作也是很有价值的.</p>
+<h3 id="CacheLib-dose-not-always-lead-to-performance-gains"><a href="#CacheLib-dose-not-always-lead-to-performance-gains" class="headerlink" title="CacheLib dose not always lead to performance gains"></a>CacheLib dose not always lead to performance gains</h3><p>毕竟作为一个通用系统，在面对很多corner case的时候还是很难比经过专门设计和调优的专有系统强的. 但是专有系统的功能可以在之后被添加到cachelib中(.</p>
+<h3 id="CacheLib-does-not-work-for-every-use-case"><a href="#CacheLib-does-not-work-for-every-use-case" class="headerlink" title="CacheLib does not work for every use case"></a>CacheLib does not work for every use case</h3><p>一些广告服务依赖于nested 数据结构，这是cachelib不能支持的.</p>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2023/10/22/Doris-%E5%A6%82%E4%BD%95%E5%AE%9E%E7%8E%B0vertical-compaction/" rel="prev" title="Doris 如何实现vertical compaction">
+      <i class="fa fa-chevron-left"></i> Doris 如何实现vertical compaction
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          Table of Contents
+        </li>
+        <li class="sidebar-nav-overview">
+          Overview
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#Abstract"><span class="nav-number">1.</span> <span class="nav-text">Abstract</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Introduction"><span class="nav-number">2.</span> <span class="nav-text">Introduction</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#Lessons-Learned-from-CacheLib"><span class="nav-number">2.1.</span> <span class="nav-text">Lessons Learned from CacheLib</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Motivation-Caching-Use-Cases"><span class="nav-number">3.</span> <span class="nav-text">Motivation: Caching Use Cases</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#Hierarchical-and-geo-distributed-caches"><span class="nav-number">3.1.</span> <span class="nav-text">Hierarchical and geo-distributed caches</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Application-look-aside-caches"><span class="nav-number">3.2.</span> <span class="nav-text">Application look-aside caches</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#in-process-caches"><span class="nav-number">3.3.</span> <span class="nav-text">in-process caches</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Machine-learning-model"><span class="nav-number">3.4.</span> <span class="nav-text">Machine learning-model</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Storage-backend-cache"><span class="nav-number">3.5.</span> <span class="nav-text">Storage-backend cache</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Database-page-buffer"><span class="nav-number">3.6.</span> <span class="nav-text">Database page buffer</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Shared-Challenges-Across-Caching-Systems-at-Facebook"><span class="nav-number">4.</span> <span class="nav-text">Shared Challenges Across Caching Systems at Facebook</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#Massive-Working-Sets"><span class="nav-number">4.1.</span> <span class="nav-text">Massive Working Sets</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#Popularity"><span class="nav-number">4.1.1.</span> <span class="nav-text">Popularity</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#Churn"><span class="nav-number">4.1.2.</span> <span class="nav-text">Churn</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Size%E5%A4%A7%E5%B0%8F%E5%A4%9A%E5%8F%98"><span class="nav-number">4.2.</span> <span class="nav-text">Size大小多变</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Bursty-Traffic"><span class="nav-number">4.3.</span> <span class="nav-text">Bursty Traffic</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Resource-Management"><span class="nav-number">4.4.</span> <span class="nav-text">Resource Management</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Computationally-Costly-Query-for-Empty-Results"><span class="nav-number">4.5.</span> <span class="nav-text">Computationally Costly Query for Empty Results</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Updating-Cached-Data-Structures"><span class="nav-number">4.6.</span> <span class="nav-text">Updating Cached Data Structures</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Frequent-Restarts"><span class="nav-number">4.7.</span> <span class="nav-text">Frequent Restarts</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Design-and-Implementation"><span class="nav-number">5.</span> <span class="nav-text">Design and Implementation</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#API%E8%AE%BE%E8%AE%A1"><span class="nav-number">5.1.</span> <span class="nav-text">API设计</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Architecture-Overview"><span class="nav-number">5.2.</span> <span class="nav-text">Architecture Overview</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Implementation-of-Advanced-Feature"><span class="nav-number">5.3.</span> <span class="nav-text">Implementation of Advanced Feature</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#structured-items"><span class="nav-number">5.3.1.</span> <span class="nav-text">structured items</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#caching-large-and-small-objects"><span class="nav-number">5.3.2.</span> <span class="nav-text">caching large and small objects</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#resource-monitoring"><span class="nav-number">5.3.3.</span> <span class="nav-text">resource monitoring</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#warm-restarts"><span class="nav-number">5.3.4.</span> <span class="nav-text">warm restarts</span></a></li></ol></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Experience-and-Discussion"><span class="nav-number">6.</span> <span class="nav-text">Experience and Discussion</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#New-features-are-adopted-by-many-system"><span class="nav-number">6.1.</span> <span class="nav-text">New features are adopted by many system</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Performance-improvements-help-many-systems"><span class="nav-number">6.2.</span> <span class="nav-text">Performance improvements help many systems</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Improved-stability"><span class="nav-number">6.3.</span> <span class="nav-text">Improved stability</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#No-single-caching-system-dominates"><span class="nav-number">6.4.</span> <span class="nav-text">No single caching system dominates</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Flash-caching-signals-a-paradigm-shift"><span class="nav-number">6.5.</span> <span class="nav-text">Flash caching signals a paradigm shift</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#CacheLib-dose-not-always-lead-to-performance-gains"><span class="nav-number">6.6.</span> <span class="nav-text">CacheLib dose not always lead to performance gains</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#CacheLib-does-not-work-for-every-use-case"><span class="nav-number">6.7.</span> <span class="nav-text">CacheLib does not work for every use case</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">John Doe</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">7</span>
+          <span class="site-state-item-name">posts</span>
+        </a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2023</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">John Doe</span>
+</div>
+  <div class="powered-by">Powered by <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://muse.theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Muse</a>
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/muse.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
